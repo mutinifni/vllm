@@ -204,6 +204,8 @@ class FusedMoE(torch.nn.Module):
         self.num_expert_group = num_expert_group
         self.topk_group = topk_group
         self.custom_routing_function = custom_routing_function
+        self.layer_id = prefix.split(".")[2]
+        self.warmed_up = False
 
         if quant_config is None:
             self.quant_method: Optional[QuantizeMethodBase] = (
@@ -469,6 +471,13 @@ class FusedMoE(torch.nn.Module):
     def forward(self, hidden_states: torch.Tensor,
                 router_logits: torch.Tensor):
         assert self.quant_method is not None
+
+        if self.warmed_up and torch.cuda.current_device() == 0:
+            logger.info(self.layer_id)
+            chosen_experts = router_logits.topk(self.top_k, dim=-1)[1].cpu().tolist()
+            logger.info(router_logits.topk(self.top_k, dim=-1)[1].cpu().tolist())
+
+        self.warmed_up = True
 
         # Matrix multiply.
         final_hidden_states = self.quant_method.apply(
