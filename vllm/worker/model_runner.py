@@ -2,9 +2,11 @@ import dataclasses
 import gc
 import inspect
 import itertools
+import logging
 import time
 import warnings
 import weakref
+import sys
 from dataclasses import dataclass
 from typing import (TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set,
                     Tuple, Type, TypeVar, Union)
@@ -59,6 +61,15 @@ if TYPE_CHECKING:
     from vllm.attention.backends.abstract import AttentionBackend
 
 logger = init_logger(__name__)
+
+# create a logger for tokens
+tokens_logger = logging.getLogger("tokens")
+tokens_logger.handlers = []
+stdout_handler = logging.StreamHandler(sys.stdout)
+formatter = logging.Formatter(':%(message)s')
+stdout_handler.setFormatter(formatter)
+tokens_logger.addHandler(stdout_handler)
+tokens_logger.setLevel(logging.INFO)
 
 LORA_WARMUP_RANK = 8
 _BATCH_SIZE_ALIGNMENT = 8
@@ -1508,6 +1519,7 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
     _model_input_cls: Type[ModelInputForGPUWithSamplingMetadata] = (
         ModelInputForGPUWithSamplingMetadata)
     _builder_cls: Type[ModelInputForGPUBuilder] = ModelInputForGPUBuilder
+    warmed_up: bool = False
 
     def make_model_input_from_broadcasted_tensor_dict(
         self,
@@ -1609,6 +1621,28 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
             model_forward_start = torch.cuda.Event(enable_timing=True)
             model_forward_end = torch.cuda.Event(enable_timing=True)
             model_forward_start.record()
+
+        if self.warmed_up and torch.cuda.current_device() == 0:
+            # For each token:
+            #   print(request_id, token_id, token_position, is_prompt)
+            # Note:
+            # - input_tokens consists of query_lens[i] tokens per request_id
+            # - input_positions maps token_id to token_position
+            # - seq_lens captures the current number of tokens per request_id
+            # - query_lens has the number of contiguous tokens per request_id
+            # - request_ids_to_seq_ids maps request_id to seq_id (same?)
+            token_index = 0
+            request_list = list(model_input.request_ids_to_seq_ids.keys())
+            for query_lens_idx, query_len in enumerate(model_input.query_lens):
+                request_id = request_list[query_lens_idx]
+                for _ in range(query_len):
+                    token_id = model_input.input_tokens[token_index].item()
+                    token_position = model_input.input_positions[token_index].item()
+                    is_prompt = 0 if query_len == 1 else 1
+                    tokens_logger.info(f"{request_id},{token_id},{token_position},{is_prompt}")
+                    token_index += 1
+
+        self.warmed_up = True
 
         hidden_or_intermediate_states = model_executable(
             input_ids=model_input.input_tokens,

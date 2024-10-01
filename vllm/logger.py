@@ -32,7 +32,7 @@ DEFAULT_LOGGING_CONFIG = {
             "class": "logging.StreamHandler",
             "formatter": "vllm",
             "level": VLLM_LOGGING_LEVEL,
-            "stream": "ext://sys.stdout",
+            "stream": "ext://sys.stderr",
         },
     },
     "loggers": {

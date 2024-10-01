@@ -1,3 +1,5 @@
+import logging
+import sys
 from abc import abstractmethod
 from enum import Enum
 from typing import Callable, List, Optional, Tuple
@@ -15,6 +17,14 @@ from vllm.model_executor.utils import set_weight_attrs
 
 logger = init_logger(__name__)
 
+# create a logger for chosen experts
+experts_logger = logging.getLogger("experts")
+experts_logger.handlers = []
+stdout_handler = logging.StreamHandler(sys.stdout)
+formatter = logging.Formatter('%(message)s')
+stdout_handler.setFormatter(formatter)
+experts_logger.addHandler(stdout_handler)
+experts_logger.setLevel(logging.INFO)
 
 class FusedMoeWeightScaleSupported(Enum):
     TENSOR = "tensor"
@@ -473,9 +483,11 @@ class FusedMoE(torch.nn.Module):
         assert self.quant_method is not None
 
         if self.warmed_up and torch.cuda.current_device() == 0:
-            logger.info(self.layer_id)
+            # For each token, print(layer_id, choices)
             chosen_experts = router_logits.topk(self.top_k, dim=-1)[1].cpu().tolist()
-            logger.info(router_logits.topk(self.top_k, dim=-1)[1].cpu().tolist())
+            for token_choices in chosen_experts:
+                token_choices_str = ",".join(map(str, token_choices))
+                experts_logger.info(f"{self.layer_id},{token_choices_str}")
 
         self.warmed_up = True
 

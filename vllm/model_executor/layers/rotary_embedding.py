@@ -22,6 +22,7 @@
 # limitations under the License.
 """Rotary Positional Embeddings."""
 import math
+import sys
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
@@ -622,7 +623,7 @@ class DeepseekScalingRotaryEmbedding(RotaryEmbedding):
         cos = (freqs.cos() * self.mscale)
         sin = (freqs.sin() * self.mscale)
         cache = torch.cat((cos, sin), dim=-1)
-        print("Cache shape", cache.shape)
+        print("Cache shape", cache.shape, file=sys.stderr)
         return cache
 
     def forward(
