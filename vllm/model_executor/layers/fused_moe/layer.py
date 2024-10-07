@@ -2,6 +2,7 @@ import logging
 import sys
 from abc import abstractmethod
 from enum import Enum
+from itertools import count
 from typing import Callable, List, Optional, Tuple
 
 import torch
@@ -179,6 +180,8 @@ class FusedMoE(torch.nn.Module):
         quant_config: Quantization configure.
     """
 
+    layer_id_counter = count()
+
     def __init__(
         self,
         num_experts: int,
@@ -214,7 +217,7 @@ class FusedMoE(torch.nn.Module):
         self.num_expert_group = num_expert_group
         self.topk_group = topk_group
         self.custom_routing_function = custom_routing_function
-        self.layer_id = prefix.split(".")[2]
+        self.layer_id = next(self.layer_id_counter)
         self.warmed_up = False
 
         if quant_config is None:
