@@ -1,14 +1,30 @@
 #!/usr/bin/env bash
-# Start the decode-only server that consumes the prefilled KV cache.
+# ---------------------------------------------------------------------------
+# Start a vLLM OpenAI-compatible server for *decode-only* latency benchmarking.
+#
+# Usage (override any env variable as needed):
+#   MODEL=/path/to/model TP_SIZE=4 PORT=8001 ./scripts/start_decode_server.sh
+#
+# Environment variables (all optional):
+#   MODEL   – HF model name or local path.
+#             Default: /home/ppatel-ext-l/models/mistralai/Mixtral-8x7B-Instruct-v0.1
+#   TP_SIZE – Tensor parallel size.               Default: 4
+#   PORT    – HTTP port for the OpenAI endpoint.  Default: 8001
+# ---------------------------------------------------------------------------
+
+set -euo pipefail
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
+MODEL="${MODEL:-/home/ppatel-ext-l/models/mistralai/Mixtral-8x7B-Instruct-v0.1}"
+TP_SIZE="${TP_SIZE:-4}"
+PORT="${PORT:-8001}"
 
-python3 benchmarks/benchmark_disagg_decode_server.py \
-        --model /home/ppatel-ext-l/models/meta-llama/Llama-2-7b-hf \
-  		--kv-cache-dir test_prefill_output/local_storage \
-  		--tensor-parallel-size 2 \
-  		--port 8001 \
-        #--model /home/ppatel-ext-l/models/mistralai/Mixtral-8x7B-Instruct-v0.1 \
+python3 -m vllm.entrypoints.openai.api_server \
+  --model "$MODEL" \
+  --tensor-parallel-size "$TP_SIZE" \
+  --disable-log-requests \
+  --port "$PORT"
 
