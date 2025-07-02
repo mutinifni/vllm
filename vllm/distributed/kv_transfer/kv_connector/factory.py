@@ -113,6 +113,11 @@ KVConnectorFactory.register_connector(
     "SharedStorageConnector")
 
 KVConnectorFactory.register_connector(
+    "PreloadedSharedStorageConnector",
+    "vllm.distributed.kv_transfer.kv_connector.v1.shared_storage_connector",
+    "PreloadedSharedStorageConnector")
+
+KVConnectorFactory.register_connector(
     "P2pNcclConnector",
     "vllm.distributed.kv_transfer.kv_connector.v1.p2p.p2p_nccl_connector",
     "P2pNcclConnector")

@@ -1237,6 +1237,22 @@ class GPUModelRunner(LoRAModelRunnerMixin):
             else:
                 pooler_output.append(None)
 
+        # Gather kv_transfer_params from KV connector (if any)
+        kv_params = None
+        if has_kv_transfer_group():
+            kv_conn = get_kv_transfer_group()
+            kv_params_tmp = {}
+            for req_id in self.input_batch.req_ids:
+                timing = None
+                try:
+                    timing = kv_conn.get_kv_load_timing(req_id)
+                except Exception:
+                    pass
+                if timing is not None:
+                    kv_params_tmp[req_id] = {"kv_load_time_ms": timing}
+            if kv_params_tmp:
+                kv_params = kv_params_tmp
+
         return ModelRunnerOutput(
             req_ids=self.input_batch.req_ids,
             req_id_to_index=self.input_batch.req_id_to_index,
@@ -1247,6 +1263,7 @@ class GPUModelRunner(LoRAModelRunnerMixin):
             pooler_output=pooler_output,
             finished_sending=finished_sending,
             finished_recving=finished_recving,
+            kv_transfer_params_dict=kv_params,
         )
 
     @torch.inference_mode()
@@ -1596,6 +1613,22 @@ class GPUModelRunner(LoRAModelRunnerMixin):
         if has_kv_transfer_group():
             get_kv_transfer_group().clear_connector_metadata()
 
+        # Gather kv_transfer_params from KV connector (if any)
+        kv_params = None
+        if has_kv_transfer_group():
+            kv_conn = get_kv_transfer_group()
+            kv_params_tmp = {}
+            for req_id in self.input_batch.req_ids:
+                timing = None
+                try:
+                    timing = kv_conn.get_kv_load_timing(req_id)
+                except Exception:
+                    pass
+                if timing is not None:
+                    kv_params_tmp[req_id] = {"kv_load_time_ms": timing}
+            if kv_params_tmp:
+                kv_params = kv_params_tmp
+
         return ModelRunnerOutput(
             req_ids=self.input_batch.req_ids,
             req_id_to_index=self.input_batch.req_id_to_index,
@@ -1607,6 +1640,7 @@ class GPUModelRunner(LoRAModelRunnerMixin):
             finished_sending=finished_sending,
             finished_recving=finished_recving,
             num_nans_in_logits=num_nans_in_logits,
+            kv_transfer_params_dict=kv_params,
         )
 
     def kv_connector_no_forward(
@@ -1860,7 +1894,7 @@ class GPUModelRunner(LoRAModelRunnerMixin):
         Randomize input_ids if VLLM_RANDOMIZE_DP_DUMMY_INPUTS is set.
         This is to help balance expert-selection
          - during profile_run
-         - during DP rank dummy run 
+         - during DP rank dummy run
         """
         dp_size = self.vllm_config.parallel_config.data_parallel_size
         randomize_inputs = envs.VLLM_RANDOMIZE_DP_DUMMY_INPUTS and dp_size > 1

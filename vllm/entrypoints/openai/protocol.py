@@ -1303,6 +1303,8 @@ class CompletionStreamResponse(OpenAIBaseModel):
     model: str
     choices: list[CompletionResponseStreamChoice]
     usage: Optional[UsageInfo] = Field(default=None)
+    kv_transfer_params: Optional[dict[str, Any]] = Field(
+        default=None, description="KVTransfer parameters.")
 
 
 class EmbeddingResponseData(OpenAIBaseModel):
@@ -1495,6 +1497,8 @@ class ChatCompletionStreamResponse(OpenAIBaseModel):
     model: str
     choices: list[ChatCompletionResponseStreamChoice]
     usage: Optional[UsageInfo] = Field(default=None)
+    kv_transfer_params: Optional[dict[str, Any]] = Field(
+        default=None, description="KVTransfer parameters.")
 
 
 class TranscriptionResponseStreamChoice(OpenAIBaseModel):

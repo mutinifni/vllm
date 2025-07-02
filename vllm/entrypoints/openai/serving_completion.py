@@ -304,8 +304,16 @@ class OpenAIServingCompletion(OpenAIServing):
         else:
             include_usage, include_continuous_usage = False, False
 
+        # Track kv_transfer_params from the final request output
+        final_kv_transfer_params = None
+
         try:
             async for prompt_idx, res in result_generator:
+                # Capture kv_transfer_params from each request output
+                # (will be overwritten by later outputs, which is fine)
+                if res.kv_transfer_params:
+                    final_kv_transfer_params = res.kv_transfer_params
+
                 prompt_token_ids = res.prompt_token_ids
                 prompt_logprobs = res.prompt_logprobs
                 prompt_text = res.prompt
@@ -412,6 +420,7 @@ class OpenAIServingCompletion(OpenAIServing):
                     model=model_name,
                     choices=[],
                     usage=final_usage_info,
+                    kv_transfer_params=final_kv_transfer_params,
                 )
                 final_usage_data = (final_usage_chunk.model_dump_json(
                     exclude_unset=False, exclude_none=True))

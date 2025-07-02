@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 from dataclasses import dataclass
-from typing import NamedTuple, Optional
+from typing import NamedTuple, Optional, Any
 
 import torch
 
@@ -108,6 +108,9 @@ class ModelRunnerOutput:
     finished_sending: Optional[set[str]] = None
     finished_recving: Optional[set[str]] = None
 
+    # Mapping from req_id -> kv_transfer_params dict (e.g., {"kv_load_time_ms": 12.3})
+    kv_transfer_params_dict: Optional[dict[str, dict[str, Any]]] = None
+
     # req_id -> num_nans_in_logits
     num_nans_in_logits: Optional[dict[str, int]] = None
 
@@ -121,4 +124,5 @@ EMPTY_MODEL_RUNNER_OUTPUT = ModelRunnerOutput(req_ids=[],
                                               pooler_output=[],
                                               finished_sending=None,
                                               finished_recving=None,
+                                              kv_transfer_params_dict=None,
                                               num_nans_in_logits=None)

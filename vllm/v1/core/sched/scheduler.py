@@ -791,7 +791,11 @@ class Scheduler(SchedulerInterface):
             stopped = False
             new_logprobs = None
             new_token_ids = generated_token_ids
+
             kv_transfer_params = None
+            if hasattr(model_runner_output, 'kv_transfer_params_dict') and \
+                model_runner_output.kv_transfer_params_dict is not None:
+                kv_transfer_params = model_runner_output.kv_transfer_params_dict.get(req_id)
 
             # Append generated tokens and check for stop. Note that if
             # a request is still being prefilled, we expect the model runner
