@@ -70,8 +70,8 @@ def _parse_args() -> argparse.Namespace:
 
     # Modify defaults for decode-only specific behavior
     parser.set_defaults(
-        backend="openai-chat",  # Different default than benchmark_serving
-        endpoint="/v1/chat/completions",  # Different default than benchmark_serving
+        backend="vllm",  # More appropriate for vLLM servers than openai-chat
+        endpoint="/v1/completions",  # Simpler than chat completions for decode-only
         dataset_name="random",  # decode_only only supports random
     )
 
@@ -241,9 +241,14 @@ async def main_async(args: argparse.Namespace):
         if v is not None
     }
 
-    # Set default temperature if not specified (for compatibility)
+    # Sampling parameters are only supported by openai-compatible backend.
+    if sampling_params and args.backend not in OPENAI_COMPATIBLE_BACKENDS:
+        raise ValueError(
+            "Sampling parameters are only supported by openai-compatible backends."
+        )
+
     if "temperature" not in sampling_params:
-        sampling_params["temperature"] = 0.0
+        sampling_params["temperature"] = 0.0  # Default to greedy decoding.
 
     # Prepare LoRA modules if specified
     lora_modules = None
@@ -366,8 +371,8 @@ async def main_async(args: argparse.Namespace):
             actual_output_lens.append(output_len)
             total_input_tokens += args.input_len  # Use consistent input length
 
-            # TTFT calculation (first token time) - use 0 for decode-only since no separate prefill
-            ttft = 0.0 if not output.itl else output.itl[0] if len(output.itl) > 0 else 0.0
+            # TTFT calculation (first token time) - always 0 for decode-only since no separate prefill
+            ttft = 0.0  # No prefill timing in decode-only benchmark
             all_ttfts.append(ttft)
 
             # E2EL calculation (total latency)

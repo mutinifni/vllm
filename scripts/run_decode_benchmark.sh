@@ -17,7 +17,7 @@ cd "$REPO_ROOT"
 # ---------------------------------------------------------------------------
 # Configurable parameters via environment variables
 # ---------------------------------------------------------------------------
-BACKEND="${BACKEND:-openai-chat}"
+BACKEND="${BACKEND:-vllm}"
 MODEL="${MODEL:-/home/ppatel-ext-l/models/mistralai/Mixtral-8x7B-Instruct-v0.1}"
 SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-}"  # leave empty to default to MODEL
 BATCH_SIZE="${BATCH_SIZE:-32}"
@@ -29,7 +29,7 @@ MEASURE_BATCHES="${MEASURE_BATCHES:-5}"
 BETWEEN_BATCH_SLEEP="${BETWEEN_BATCH_SLEEP:-0}"
 HOST="${HOST:-127.0.0.1}"
 PORT="${PORT:-8001}"
-ENDPOINT="${ENDPOINT:-/v1/chat/completions}"
+ENDPOINT="${ENDPOINT:-/v1/completions}"
 
 python3 benchmarks/benchmark_decode_only.py \
   --backend "$BACKEND" \
