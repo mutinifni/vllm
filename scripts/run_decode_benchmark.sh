@@ -27,7 +27,6 @@ SKIP_INITIAL_TOKENS="${SKIP_INITIAL_TOKENS:-2}"
 WARMUP_BATCHES="${WARMUP_BATCHES:-1}"
 MEASURE_BATCHES="${MEASURE_BATCHES:-5}"
 BETWEEN_BATCH_SLEEP="${BETWEEN_BATCH_SLEEP:-0}"
-REPORT_BATCH_ITERS="${REPORT_BATCH_ITERS:-1}"
 HOST="${HOST:-127.0.0.1}"
 PORT="${PORT:-8001}"
 ENDPOINT="${ENDPOINT:-/v1/chat/completions}"
@@ -45,5 +44,4 @@ python3 benchmarks/benchmark_decode_only.py \
   --between-batch-sleep "$BETWEEN_BATCH_SLEEP" \
   --host "$HOST" \
   --port "$PORT" \
-  --endpoint "$ENDPOINT" \
-  $( [ "$REPORT_BATCH_ITERS" = "1" ] && echo "--report-batch-iterations" )
+  --endpoint "$ENDPOINT"
