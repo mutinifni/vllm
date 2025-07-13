@@ -18,9 +18,16 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedTokenize
 
 from benchmark_dataset import (
     AIMODataset,
+    ASRDataset,
     BurstGPTDataset,
     ConversationDataset,
+    CustomDataset,
+    GSM8KDataset,
+    HumanEvalDataset,
     InstructCoderDataset,
+    MMLUDataset,
+    MTBenchDataset,
+    NextEditPredictionDataset,
     RandomDataset,
     SampleRequest,
     ShareGPTDataset,
@@ -329,6 +336,12 @@ def get_requests(args, tokenizer):
         "dataset_path": args.dataset_path,
         "random_seed": args.seed,
     }
+
+    # Add cache_dir support for HuggingFace datasets
+    # Priority: command line argument > environment variable > default HF cache
+    cache_dir = args.cache_dir or os.environ.get("HF_DATASETS_CACHE")
+    if cache_dir:
+        common_kwargs["cache_dir"] = cache_dir
     sample_kwargs = {
         "tokenizer": tokenizer,
         "lora_path": args.lora_path,
@@ -355,6 +368,35 @@ def get_requests(args, tokenizer):
         sample_kwargs["return_prompt_formatted"] = True
     elif args.dataset_name == "burstgpt":
         dataset_cls = BurstGPTDataset
+    elif args.dataset_name == "custom":
+        dataset_cls = CustomDataset
+        sample_kwargs["skip_chat_template"] = args.skip_chat_template
+    elif args.dataset_name == "mmlu":
+        dataset_cls = MMLUDataset
+        common_kwargs["dataset_subset"] = getattr(args, "mmlu_subject", None)
+        common_kwargs["dataset_split"] = getattr(args, "mmlu_split", "test")
+        sample_kwargs["subject"] = getattr(args, "mmlu_subject", None)
+        sample_kwargs["skip_chat_template"] = args.skip_chat_template
+    elif args.dataset_name == "humaneval":
+        dataset_cls = HumanEvalDataset
+        common_kwargs["dataset_split"] = getattr(args, "humaneval_split", "test")
+        sample_kwargs["skip_chat_template"] = args.skip_chat_template
+    elif args.dataset_name == "gsm8k":
+        dataset_cls = GSM8KDataset
+        common_kwargs["dataset_subset"] = args.hf_subset
+        common_kwargs["dataset_split"] = getattr(args, "gsm8k_split", "test")
+        sample_kwargs["skip_chat_template"] = args.skip_chat_template
+    elif args.dataset_name == "mtbench":
+        dataset_cls = MTBenchDataset
+        common_kwargs["dataset_split"] = "train"
+        sample_kwargs["skip_chat_template"] = args.skip_chat_template
+    elif args.dataset_name == "asr":
+        dataset_cls = ASRDataset
+        common_kwargs["dataset_subset"] = getattr(args, "asr_subset", None)
+        common_kwargs["dataset_split"] = "train"
+    elif args.dataset_name == "nepedit":
+        dataset_cls = NextEditPredictionDataset
+        common_kwargs["dataset_split"] = "train"
     elif args.dataset_name == "hf":
         if args.dataset_path in VisionArenaDataset.SUPPORTED_DATASET_PATHS:
             dataset_cls = VisionArenaDataset
@@ -373,6 +415,33 @@ def get_requests(args, tokenizer):
             dataset_cls = AIMODataset
             common_kwargs["dataset_subset"] = None
             common_kwargs["dataset_split"] = "train"
+        elif args.dataset_path in MMLUDataset.SUPPORTED_DATASET_PATHS:
+            dataset_cls = MMLUDataset
+            common_kwargs["dataset_subset"] = args.hf_subset
+            common_kwargs["dataset_split"] = args.hf_split or "test"
+            sample_kwargs["skip_chat_template"] = args.skip_chat_template
+        elif args.dataset_path in HumanEvalDataset.SUPPORTED_DATASET_PATHS:
+            dataset_cls = HumanEvalDataset
+            common_kwargs["dataset_split"] = args.hf_split or "test"
+            sample_kwargs["skip_chat_template"] = args.skip_chat_template
+        elif args.dataset_path in GSM8KDataset.SUPPORTED_DATASET_PATHS:
+            dataset_cls = GSM8KDataset
+            common_kwargs["dataset_subset"] = args.hf_subset
+            common_kwargs["dataset_split"] = args.hf_split or "test"
+            sample_kwargs["skip_chat_template"] = args.skip_chat_template
+        elif args.dataset_path in MTBenchDataset.SUPPORTED_DATASET_PATHS:
+            dataset_cls = MTBenchDataset
+            common_kwargs["dataset_split"] = "train"
+            sample_kwargs["skip_chat_template"] = args.skip_chat_template
+        elif args.dataset_path in ASRDataset.SUPPORTED_DATASET_PATHS:
+            dataset_cls = ASRDataset
+            common_kwargs["dataset_subset"] = args.hf_subset
+            common_kwargs["dataset_split"] = "train"
+        elif args.dataset_path in NextEditPredictionDataset.SUPPORTED_DATASET_PATHS:
+            dataset_cls = NextEditPredictionDataset
+            common_kwargs["dataset_split"] = "train"
+        else:
+            raise ValueError(f"{args.dataset_path} is not supported by hf dataset.")
     else:
         raise ValueError(f"Unknown dataset name: {args.dataset_name}")
     # Remove None values
@@ -513,14 +582,15 @@ def validate_args(args):
 
     # === Dataset Name Specific Checks ===
     # --hf-subset and --hf-split: only used
-    # when dataset_name is 'hf'
-    if args.dataset_name != "hf" and (
+    # when dataset_name is 'hf' or specific HuggingFace datasets
+    hf_datasets = ["hf", "mmlu", "humaneval", "gsm8k", "mtbench", "asr", "nepedit"]
+    if args.dataset_name not in hf_datasets and (
         getattr(args, "hf_subset", None) is not None
         or getattr(args, "hf_split", None) is not None
     ):
         warnings.warn(
-            "--hf-subset and --hf-split will be ignored \
-                since --dataset-name is not 'hf'.",
+            f"--hf-subset and --hf-split will be ignored \
+                since --dataset-name '{args.dataset_name}' does not support them.",
             stacklevel=2,
         )
     elif args.dataset_name == "hf":
@@ -534,12 +604,33 @@ def validate_args(args):
         elif args.dataset_path in (
             InstructCoderDataset.SUPPORTED_DATASET_PATHS
             | AIMODataset.SUPPORTED_DATASET_PATHS
+            | MMLUDataset.SUPPORTED_DATASET_PATHS
+            | HumanEvalDataset.SUPPORTED_DATASET_PATHS
+            | GSM8KDataset.SUPPORTED_DATASET_PATHS
+            | MTBenchDataset.SUPPORTED_DATASET_PATHS
+            | NextEditPredictionDataset.SUPPORTED_DATASET_PATHS
         ):
             assert args.backend == "vllm", (
                 f"{args.dataset_path} needs to use vllm as the backend."
             )  # noqa: E501
+        elif args.dataset_path in ASRDataset.SUPPORTED_DATASET_PATHS:
+            assert args.backend == "vllm-chat", (
+                f"{args.dataset_path} (ASR dataset) needs to use vllm-chat as the backend."
+            )  # noqa: E501
         else:
             raise ValueError(f"{args.dataset_path} is not supported by hf dataset.")
+
+    # Dataset path validation for standalone datasets
+    elif args.dataset_name in ["custom", "mmlu", "humaneval", "gsm8k", "mtbench", "asr", "nepedit"]:
+        if args.dataset_name == "custom" and not args.dataset_path:
+            raise ValueError("Dataset path is required for custom dataset")
+        elif args.dataset_name in ["mmlu", "humaneval", "gsm8k", "mtbench", "asr", "nepedit"] and not args.dataset_path:
+            # These datasets need a dataset path if not using HF defaults
+            warnings.warn(f"No dataset path specified for {args.dataset_name}. Using default HuggingFace dataset.")
+
+        # Backend requirements for specific datasets
+        if args.dataset_name == "asr" and args.backend != "vllm-chat":
+            raise ValueError("ASR dataset requires vllm-chat backend for multimodal audio support")
 
     # --random-range-ratio: only used when dataset_name is 'random'
     if args.dataset_name != "random" and args.random_range_ratio is not None:
@@ -606,7 +697,7 @@ def create_argument_parser():
     parser.add_argument(
         "--dataset-name",
         type=str,
-        choices=["sharegpt", "random", "sonnet", "burstgpt", "hf"],
+        choices=["sharegpt", "random", "sonnet", "burstgpt", "hf", "custom", "mmlu", "humaneval", "gsm8k", "mtbench", "asr", "nepedit"],
         help="Name of the dataset to benchmark on.",
         default="sharegpt",
     )
@@ -621,6 +712,13 @@ def create_argument_parser():
     )
     parser.add_argument(
         "--dataset-path", type=str, default=None, help="Path to the dataset"
+    )
+    parser.add_argument(
+        "--cache-dir",
+        type=str,
+        default=None,
+        help="Cache directory for HuggingFace datasets. If not specified, "
+        "will use HF_DATASETS_CACHE environment variable or default HF cache.",
     )
     parser.add_argument(
         "--input-len",
@@ -708,12 +806,48 @@ def create_argument_parser():
         "[length * (1 - range_ratio), length * (1 + range_ratio)].",
     )
 
-    # hf dtaset
+    # hf dataset
     parser.add_argument(
         "--hf-subset", type=str, default=None, help="Subset of the HF dataset."
     )
     parser.add_argument(
         "--hf-split", type=str, default=None, help="Split of the HF dataset."
+    )
+
+    # Unified chat template argument (applies to all datasets)
+    parser.add_argument(
+        "--skip-chat-template", action="store_true",
+        help="Skip applying chat template to dataset prompts. "
+        "Applies to all datasets that support chat template formatting."
+    )
+
+    # mmlu dataset
+    parser.add_argument(
+        "--mmlu-subject", type=str, default=None,
+        help="MMLU subject to test on (e.g., 'abstract_algebra', 'all' for all subjects). "
+        "If not specified, uses all subjects."
+    )
+    parser.add_argument(
+        "--mmlu-split", type=str, default="test",
+        help="MMLU dataset split to use (default: test)."
+    )
+
+    # humaneval dataset
+    parser.add_argument(
+        "--humaneval-split", type=str, default="test",
+        help="HumanEval dataset split to use (default: test)."
+    )
+
+    # gsm8k dataset
+    parser.add_argument(
+        "--gsm8k-split", type=str, default="test",
+        help="GSM8K dataset split to use (default: test)."
+    )
+
+    # asr dataset
+    parser.add_argument(
+        "--asr-subset", type=str, default=None,
+        help="ASR dataset subset to use (language code for some datasets)."
     )
 
     parser = AsyncEngineArgs.add_cli_args(parser)

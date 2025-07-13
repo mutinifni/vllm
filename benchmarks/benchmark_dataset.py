@@ -26,7 +26,7 @@ from typing import Any, Callable, Optional, Union
 
 import numpy as np
 import pandas as pd
-from datasets import load_dataset
+from datasets import load_dataset, load_from_disk
 from PIL import Image
 from transformers import PreTrainedTokenizerBase
 
@@ -701,21 +701,23 @@ class HuggingFaceDataset(BenchmarkDataset):
         dataset_path: str,
         dataset_split: str,
         dataset_subset: Optional[str] = None,
+        cache_dir: Optional[str] = None,
         **kwargs,
     ) -> None:
         super().__init__(dataset_path=dataset_path, **kwargs)
 
         self.dataset_split = dataset_split
         self.dataset_subset = dataset_subset
+        self.cache_dir = cache_dir
         self.load_data()
 
     def load_data(self) -> None:
-        """Load data from HuggingFace datasets."""
+        """Load data from HuggingFace datasets with caching."""
         self.data = load_dataset(
             self.dataset_path,
             name=self.dataset_subset,
             split=self.dataset_split,
-            streaming=True,
+            cache_dir=self.cache_dir,
         )
         self.data = self.data.shuffle(seed=self.random_seed)
 
@@ -912,6 +914,7 @@ class MTBenchDataset(HuggingFaceDataset):
         num_requests: int,
         output_len: Optional[int] = None,
         enable_multimodal_chat: bool = False,
+        skip_chat_template: bool = False,
         **kwargs,
     ) -> list:
         output_len = output_len if output_len is not None else self.DEFAULT_OUTPUT_LEN
@@ -922,12 +925,14 @@ class MTBenchDataset(HuggingFaceDataset):
                 break
             prompt = item["turns"][0]
 
-            # apply template
-            prompt = tokenizer.apply_chat_template(
-                [{"role": "user", "content": prompt}],
-                add_generation_prompt=True,
-                tokenize=False,
-            )
+            # Apply chat template (unless skipped)
+            if not skip_chat_template:
+                prompt = tokenizer.apply_chat_template(
+                    [{"role": "user", "content": prompt}],
+                    add_generation_prompt=True,
+                    tokenize=False,
+                )
+            # If skip_chat_template is True, use the raw prompt
 
             prompt_len = len(tokenizer(prompt).input_ids)
             sampled_requests.append(
@@ -1163,5 +1168,257 @@ class ASRDataset(HuggingFaceDataset):
                 " what Whisper supports.",
                 skipped,
             )
+        self.maybe_oversample_requests(sampled_requests, num_requests)
+        return sampled_requests
+
+
+# -----------------------------------------------------------------------------
+# MMLU Dataset Implementation
+# -----------------------------------------------------------------------------
+
+
+class MMLUDataset(HuggingFaceDataset):
+    """
+    MMLU (Massive Multitask Language Understanding) Dataset.
+
+    MMLU is a benchmark for evaluating language models on a wide range of
+    academic subjects. It consists of multiple-choice questions across
+    57 subjects ranging from elementary mathematics to advanced physics,
+    computer science, law, and more.
+
+    The dataset contains questions with 4 answer choices (A, B, C, D).
+    Each subject has its own split, and we can either test on specific
+    subjects or aggregate across all subjects.
+    """
+
+    DEFAULT_OUTPUT_LEN = 1  # MMLU typically needs short answers (A/B/C/D)
+    SUPPORTED_DATASET_PATHS = {
+        "cais/mmlu",
+        "lukaemon/mmlu",
+    }
+
+    def __init__(
+        self,
+        dataset_path: str,
+        dataset_split: str = "test",
+        dataset_subset: Optional[str] = None,
+        **kwargs,
+    ) -> None:
+        # MMLU has many subjects, we can specify a specific one or use "all"
+        super().__init__(
+            dataset_path=dataset_path,
+            dataset_split=dataset_split,
+            dataset_subset=dataset_subset,
+            **kwargs,
+        )
+
+    def load_data(self) -> None:
+        """Load MMLU data with subject filtering support."""
+        # Load from HuggingFace Hub with caching
+        super().load_data()
+
+        # Handle MMLU subject filtering
+        if self.dataset_subset and self.dataset_subset != "all":
+            logger.info(f"Filtering MMLU dataset by subject: {self.dataset_subset}")
+            self.data = self.data.filter(lambda x: x['subject'] == self.dataset_subset)
+            logger.info(f"Filtered MMLU dataset to subject '{self.dataset_subset}'")
+
+    def sample(
+        self,
+        tokenizer: PreTrainedTokenizerBase,
+        num_requests: int,
+        output_len: Optional[int] = None,
+        subject: Optional[str] = None,
+        skip_chat_template: bool = False,
+        **kwargs,
+    ) -> list:
+        """
+        Sample MMLU questions.
+
+        Args:
+            tokenizer: The tokenizer to use
+            num_requests: Number of requests to generate
+            output_len: Expected output length (defaults to 1 for A/B/C/D)
+            subject: Specific subject to sample from (if specified, creates a new dataset instance)
+            skip_chat_template: Skip applying chat template to prompts
+            **kwargs: Additional arguments
+        """
+        output_len = output_len if output_len is not None else self.DEFAULT_OUTPUT_LEN
+        sampled_requests = []
+
+        # If a specific subject is requested that differs from our loaded data,
+        # create a new dataset instance with that subject
+        data_to_use = self.data
+        if subject and subject != "all" and subject != self.dataset_subset:
+            # Create a temporary dataset instance with the specified subject
+            temp_dataset = MMLUDataset(
+                dataset_path=self.dataset_path,
+                dataset_split=self.dataset_split,
+                dataset_subset=subject,
+                cache_dir=self.cache_dir,
+                random_seed=self.random_seed,
+            )
+            data_to_use = temp_dataset.data
+
+        for item in data_to_use:
+            if len(sampled_requests) >= num_requests:
+                break
+
+            # MMLU format: question, choices (A, B, C, D), answer
+            question = item["question"]
+            choices = item["choices"]
+
+            # Format the prompt as a multiple choice question
+            choices_text = "\n".join([f"{chr(65 + i)}. {choice}" for i, choice in enumerate(choices)])
+            prompt = f"Question: {question}\n\n{choices_text}\n\nAnswer:"
+
+            # Apply chat template for instruction following models (unless skipped)
+            if not skip_chat_template:
+                prompt = tokenizer.apply_chat_template(
+                    [{"role": "user", "content": prompt}],
+                    add_generation_prompt=True,
+                    tokenize=False,
+                )
+
+            prompt_len = len(tokenizer(prompt).input_ids)
+
+            sampled_requests.append(
+                SampleRequest(
+                    prompt=prompt,
+                    prompt_len=prompt_len,
+                    expected_output_len=output_len,
+                )
+            )
+
+        self.maybe_oversample_requests(sampled_requests, num_requests)
+        return sampled_requests
+
+
+# -----------------------------------------------------------------------------
+# HumanEval Dataset Implementation
+# -----------------------------------------------------------------------------
+
+
+class HumanEvalDataset(HuggingFaceDataset):
+    """
+    HumanEval Dataset for code generation evaluation.
+
+    HumanEval is a dataset of 164 original programming problems, designed
+    to measure functional correctness for synthesizing programs from docstrings.
+    """
+
+    DEFAULT_OUTPUT_LEN = 512  # Code generation typically needs longer outputs
+    SUPPORTED_DATASET_PATHS = {
+        "openai/HumanEval",
+        "openai_humaneval",
+    }
+
+    def sample(
+        self,
+        tokenizer: PreTrainedTokenizerBase,
+        num_requests: int,
+        output_len: Optional[int] = None,
+        skip_chat_template: bool = False,
+        **kwargs,
+    ) -> list:
+        output_len = output_len if output_len is not None else self.DEFAULT_OUTPUT_LEN
+        sampled_requests = []
+
+        for item in self.data:
+            if len(sampled_requests) >= num_requests:
+                break
+
+            # HumanEval format: prompt (function signature + docstring)
+            prompt = item["prompt"]
+
+            # Apply chat template for code generation (unless skipped)
+            if not skip_chat_template:
+                code_prompt = f"Complete the following Python function:\n\n{prompt}"
+                prompt = tokenizer.apply_chat_template(
+                    [{"role": "user", "content": code_prompt}],
+                    add_generation_prompt=True,
+                    tokenize=False,
+                )
+            else:
+                # Use a simple format without chat template
+                prompt = f"Complete the following Python function:\n\n{prompt}"
+
+            prompt_len = len(tokenizer(prompt).input_ids)
+
+            sampled_requests.append(
+                SampleRequest(
+                    prompt=prompt,
+                    prompt_len=prompt_len,
+                    expected_output_len=output_len,
+                )
+            )
+
+        self.maybe_oversample_requests(sampled_requests, num_requests)
+        return sampled_requests
+
+
+# -----------------------------------------------------------------------------
+# GSM8K Dataset Implementation
+# -----------------------------------------------------------------------------
+
+
+class GSM8KDataset(HuggingFaceDataset):
+    """
+    GSM8K (Grade School Math 8K) Dataset.
+
+    GSM8K is a dataset of 8.5K high quality linguistically diverse grade
+    school math word problems. The problems take between 2 and 8 steps to solve,
+    and solutions primarily involve performing a sequence of elementary
+    calculations using basic arithmetic operations.
+    """
+
+    DEFAULT_OUTPUT_LEN = 256  # Math reasoning typically needs medium-length outputs
+    SUPPORTED_DATASET_PATHS = {
+        "openai/gsm8k",
+        "gsm8k",
+    }
+
+    def sample(
+        self,
+        tokenizer: PreTrainedTokenizerBase,
+        num_requests: int,
+        output_len: Optional[int] = None,
+        skip_chat_template: bool = False,
+        **kwargs,
+    ) -> list:
+        output_len = output_len if output_len is not None else self.DEFAULT_OUTPUT_LEN
+        sampled_requests = []
+
+        for item in self.data:
+            if len(sampled_requests) >= num_requests:
+                break
+
+            # GSM8K format: question and answer
+            question = item["question"]
+
+            # Format as a math problem solving prompt
+            math_prompt = f"Solve this math problem step by step:\n\n{question}"
+
+            # Apply chat template (unless skipped)
+            if not skip_chat_template:
+                prompt = tokenizer.apply_chat_template(
+                    [{"role": "user", "content": math_prompt}],
+                    add_generation_prompt=True,
+                    tokenize=False,
+                )
+            else:
+                # Use simple format without chat template
+                prompt = math_prompt
+
+            prompt_len = len(tokenizer(prompt).input_ids)
+
+            sampled_requests.append(
+                SampleRequest(
+                    prompt=prompt,
+                    prompt_len=prompt_len,
+                    expected_output_len=output_len,
+                )
+            )
+
         self.maybe_oversample_requests(sampled_requests, num_requests)
         return sampled_requests
