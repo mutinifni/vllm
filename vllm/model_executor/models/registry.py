@@ -93,6 +93,9 @@ _TEXT_GENERATION_MODELS = {
     "DenseDeepseekV2ForCausalLM": ("dense_deepseek_v2", "DenseDeepseekV2ForCausalLM"),
     "DenseDeepseekV3ForCausalLM": ("dense_deepseek_v2", "DenseDeepseekV3ForCausalLM"),
     "DenseLlama4ForCausalLM": ("dense_llama4", "DenseLlama4ForCausalLM"),
+    "Qwen2MoeOnlyForCausalLM": ("qwen2_moe_only", "Qwen2MoeOnlyForCausalLM"),
+    "MixtralMoEOnlyForCausalLM": ("mixtral_moe_only", "MixtralMoEOnlyForCausalLM"),
+    "DenseMixtralMoEOnlyForCausalLM": ("dense_mixtral_moe_only", "DenseMixtralMoEOnlyForCausalLM"),
     # transformers's mpt class has lower case
     "MptForCausalLM": ("mpt", "MPTForCausalLM"),
     "MPTForCausalLM": ("mpt", "MPTForCausalLM"),
